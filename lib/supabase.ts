@@ -9,7 +9,7 @@ export const supabase = createClient(url, key);
 export async function getCotizaciones(cliente?: string, desde?: string, hasta?: string) {
   let q = supabase.from("cotizaciones").select("*").order("created_at", { ascending: false });
   if (cliente) q = q.ilike("cliente", `%${cliente}%`);
-  if (desde) q = q.gte("created_at", desde);
+  if (desde) q = q.gte("created_at", `${desde}T00:00:00`);
   if (hasta) q = q.lte("created_at", `${hasta}T23:59:59`);
   const { data, error } = await q;
   if (error) throw error;
@@ -29,7 +29,7 @@ export async function deleteCotizacion(id: string) {
 export async function getVentas(cliente?: string, desde?: string, hasta?: string) {
   let q = supabase.from("ventas").select("*").order("created_at", { ascending: false });
   if (cliente) q = q.ilike("cliente", `%${cliente}%`);
-  if (desde) q = q.gte("created_at", desde);
+  if (desde) q = q.gte("created_at", `${desde}T00:00:00`);
   if (hasta) q = q.lte("created_at", `${hasta}T23:59:59`);
   const { data, error } = await q;
   if (error) throw error;
