@@ -26,8 +26,8 @@ export async function generarBoleta(venta: Venta): Promise<void> {
 
   // Customer info
   let y = 38;
-  const fecha = venta.created_at
-    ? new Date(venta.created_at).toLocaleDateString("es-PE")
+  const fecha = venta.fecha_registro
+    ? new Date(venta.fecha_registro).toLocaleDateString("es-PE")
     : new Date().toLocaleDateString("es-PE");
   const { descripcion } = decodeMateriales(venta.descripcion);
 

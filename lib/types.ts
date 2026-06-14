@@ -9,7 +9,7 @@ export interface Cotizacion {
   inv_sin_margen: number;
   inv_con_margen: number;
   inv_con_ganancia: number;
-  created_at?: string;
+  fecha_registro?: string;
 }
 
 export interface Venta {
@@ -20,7 +20,7 @@ export interface Venta {
   telefono: string;
   costo_base: number;
   precio_venta: number;
-  created_at?: string;
+  fecha_registro?: string;
 }
 
 export interface MaterialInput {

@@ -135,7 +135,7 @@ export default function Ventas() {
                     <td className="p-2">{r.telefono || "-"}</td>
                     <td className="p-2 text-right">{fmtS(r.costo_base)}</td>
                     <td className="p-2 text-right font-bold text-green-700">{fmtS(r.precio_venta)}</td>
-                    <td className="p-2 text-gray-500">{fmtFecha(r.created_at)}</td>
+                    <td className="p-2 text-gray-500">{fmtFecha(r.fecha_registro)}</td>
                   </tr>
                 );
               })}
@@ -158,7 +158,7 @@ export default function Ventas() {
               <p><span className="font-semibold">Cliente:</span> {detalle.cliente}</p>
               <p><span className="font-semibold">DNI:</span> {detalle.dni || "-"}</p>
               <p><span className="font-semibold">Teléfono:</span> {detalle.telefono || "-"}</p>
-              <p><span className="font-semibold">Fecha:</span> {fmtFecha(detalle.created_at)}</p>
+              <p><span className="font-semibold">Fecha:</span> {fmtFecha(detalle.fecha_registro)}</p>
             </div>
 
             {(() => {

@@ -139,7 +139,7 @@ export default function Cotizaciones({ onVentaGuardada }: { onVentaGuardada: () 
                       <td className="p-2 text-right">{fmt(r.inv_sin_margen)}</td>
                       <td className="p-2 text-right">{fmt(r.inv_con_margen)}</td>
                       <td className="p-2 text-right font-bold text-[#2980b9]">{fmt(r.inv_con_ganancia)}</td>
-                      <td className="p-2 text-gray-500">{fmtFecha(r.created_at)}</td>
+                      <td className="p-2 text-gray-500">{fmtFecha(r.fecha_registro)}</td>
                     </tr>
                   );
                 })}
