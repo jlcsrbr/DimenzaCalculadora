@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { getVentas } from "@/lib/supabase";
+import { getVentas, deleteVenta } from "@/lib/supabase";
 import { decodeMateriales } from "@/lib/calculadora-logica";
 import { generarBoleta } from "@/lib/pdf-generator";
 import { Venta } from "@/lib/types";
@@ -21,6 +21,8 @@ export default function Ventas() {
   const [selected, setSelected] = useState<string | null>(null);
   const [detalle, setDetalle] = useState<Venta | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [confirmEliminar, setConfirmEliminar] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async (cl?: string, de?: string, ha?: string) => {
     setLoading(true);
@@ -51,6 +53,21 @@ export default function Ventas() {
     }
   };
 
+  const eliminar = async () => {
+    if (!selected) return;
+    setDeleting(true);
+    try {
+      await deleteVenta(selected);
+      setSelected(null);
+      setConfirmEliminar(false);
+      await load(filtroCliente || undefined, filtroDesde || undefined, filtroHasta || undefined);
+    } catch (e) {
+      setError("Error al eliminar: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const inputCls = "border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#2980b9]";
 
   return (
@@ -78,14 +95,21 @@ export default function Ventas() {
             disabled={!selectedRow}
             className="bg-[#1f618d] hover:bg-[#154360] text-white text-sm px-4 py-1.5 rounded transition-colors disabled:opacity-40"
           >
-            Ver Detalle Técnico
+            Ver Detalle
           </button>
           <button
             onClick={exportarPDF}
             disabled={!selectedRow || exporting}
             className="bg-green-600 hover:bg-green-700 text-white text-sm px-4 py-1.5 rounded transition-colors disabled:opacity-40"
           >
-            {exporting ? "Generando PDF..." : "Exportar Boleta PDF"}
+            {exporting ? "Generando..." : "Exportar PDF"}
+          </button>
+          <button
+            onClick={() => setConfirmEliminar(true)}
+            disabled={!selected}
+            className="bg-red-500 hover:bg-red-600 text-white text-sm px-4 py-1.5 rounded transition-colors disabled:opacity-40"
+          >
+            Eliminar
           </button>
         </div>
       </div>
@@ -208,13 +232,43 @@ export default function Ventas() {
 
             <div className="mt-4 flex justify-end gap-2">
               <button
-                onClick={() => { generarBoleta(detalle); }}
+                onClick={() => generarBoleta(detalle)}
                 className="bg-[#2980b9] hover:bg-[#1f618d] text-white text-sm px-4 py-2 rounded transition-colors"
               >
                 Exportar PDF
               </button>
               <button onClick={() => setDetalle(null)} className="bg-gray-200 hover:bg-gray-300 text-gray-700 text-sm px-4 py-2 rounded transition-colors">
                 Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm delete modal */}
+      {confirmEliminar && selectedRow && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-sm w-full p-6">
+            <h2 className="text-base font-bold text-red-600 mb-2">Eliminar venta</h2>
+            <p className="text-sm text-gray-600 mb-1">¿Estás seguro de eliminar esta venta?</p>
+            <div className="bg-red-50 rounded p-3 text-sm mb-4">
+              <p><span className="font-semibold">Cliente:</span> {selectedRow.cliente}</p>
+              <p><span className="font-semibold">Precio:</span> {fmtS(selectedRow.precio_venta)}</p>
+              <p><span className="font-semibold">Fecha:</span> {fmtFecha(selectedRow.fecha_registro)}</p>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setConfirmEliminar(false)}
+                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 text-sm rounded transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={eliminar}
+                disabled={deleting}
+                className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white text-sm rounded transition-colors disabled:opacity-50"
+              >
+                {deleting ? "Eliminando..." : "Eliminar"}
               </button>
             </div>
           </div>

@@ -21,13 +21,14 @@ export default function Cotizaciones({ onVentaGuardada }: { onVentaGuardada: () 
   const [precioVenta, setPrecioVenta] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [confirmEliminar, setConfirmEliminar] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async (cl?: string, de?: string, ha?: string) => {
     setLoading(true);
     setError("");
     try {
-      const data = await getCotizaciones(cl, de, ha);
-      setRows(data);
+      setRows(await getCotizaciones(cl, de, ha));
     } catch (e) {
       setError("Error al cargar cotizaciones: " + (e instanceof Error ? e.message : String(e)));
     } finally {
@@ -69,6 +70,21 @@ export default function Cotizaciones({ onVentaGuardada }: { onVentaGuardada: () 
     }
   };
 
+  const eliminar = async () => {
+    if (!selected) return;
+    setDeleting(true);
+    try {
+      await deleteCotizacion(selected);
+      setSelected(null);
+      setConfirmEliminar(false);
+      await load(filtroCliente || undefined, filtroDesde || undefined, filtroHasta || undefined);
+    } catch (e) {
+      setError("Error al eliminar: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const inputCls = "border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#2980b9]";
 
   return (
@@ -91,6 +107,13 @@ export default function Cotizaciones({ onVentaGuardada }: { onVentaGuardada: () 
           </div>
           <button onClick={buscar} className="bg-[#2980b9] hover:bg-[#1f618d] text-white text-sm px-4 py-1.5 rounded transition-colors">Buscar</button>
           <button onClick={limpiar} className="bg-gray-200 hover:bg-gray-300 text-gray-700 text-sm px-4 py-1.5 rounded transition-colors">Limpiar</button>
+          <button
+            onClick={() => setConfirmEliminar(true)}
+            disabled={!selected}
+            className="ml-auto bg-red-500 hover:bg-red-600 text-white text-sm px-4 py-1.5 rounded transition-colors disabled:opacity-40"
+          >
+            Eliminar
+          </button>
         </div>
 
         {/* Table */}
@@ -152,7 +175,6 @@ export default function Cotizaciones({ onVentaGuardada }: { onVentaGuardada: () 
       {/* Cerrar venta panel */}
       <div className="bg-white rounded-lg shadow p-4">
         <h2 className="text-sm font-bold text-[#1f618d] uppercase mb-3">Cerrar Venta</h2>
-
         {selectedRow ? (
           <div className="space-y-3">
             <div className="bg-[#ebf5ff] rounded p-3 text-xs space-y-1">
@@ -185,6 +207,35 @@ export default function Cotizaciones({ onVentaGuardada }: { onVentaGuardada: () 
           </p>
         )}
       </div>
+
+      {/* Confirm delete modal */}
+      {confirmEliminar && selectedRow && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-sm w-full p-6">
+            <h2 className="text-base font-bold text-red-600 mb-2">Eliminar cotización</h2>
+            <p className="text-sm text-gray-600 mb-1">¿Estás seguro de eliminar esta cotización?</p>
+            <div className="bg-red-50 rounded p-3 text-sm mb-4">
+              <p><span className="font-semibold">Cliente:</span> {selectedRow.cliente}</p>
+              <p><span className="font-semibold">Total:</span> {fmt(selectedRow.inv_con_ganancia)}</p>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setConfirmEliminar(false)}
+                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 text-sm rounded transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={eliminar}
+                disabled={deleting}
+                className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white text-sm rounded transition-colors disabled:opacity-50"
+              >
+                {deleting ? "Eliminando..." : "Eliminar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -45,3 +45,8 @@ export async function insertVenta(v: Omit<Venta, "fecha_registro">) {
   const { error } = await supabase.from("ventas").insert([v]);
   if (error) throw sbError(error);
 }
+
+export async function deleteVenta(id: string) {
+  const { error } = await supabase.from("ventas").delete().eq("id", id);
+  if (error) throw sbError(error);
+}
