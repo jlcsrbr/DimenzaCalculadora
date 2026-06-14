@@ -59,7 +59,6 @@ export default function Cotizaciones({ onVentaGuardada }: { onVentaGuardada: () 
         costo_base: selectedRow.inv_con_margen,
         precio_venta: precio,
       });
-      await deleteCotizacion(selectedRow.id);
       setSelected(null);
       setPrecioVenta("");
       onVentaGuardada();
