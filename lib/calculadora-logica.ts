@@ -1,11 +1,10 @@
-import { MaterialInput, CalculoResult } from "./types";
+import { MaterialInput, CalculoResult, FormulaConfig, DEFAULT_FORMULA } from "./types";
 
-const LABOR_RATE = 0.08;
-const ELECTRICITY_RATE = 0.008;
-const MARGIN = 1.2;
-const PROFIT = 1.3;
-
-export function calcular(materiales: MaterialInput[], tiempoMinutos: number): CalculoResult {
+export function calcular(
+  materiales: MaterialInput[],
+  tiempoMinutos: number,
+  config: FormulaConfig = DEFAULT_FORMULA
+): CalculoResult {
   let costoMaterial = 0;
   let totalGramos = 0;
 
@@ -19,12 +18,12 @@ export function calcular(materiales: MaterialInput[], tiempoMinutos: number): Ca
   }
 
   const precioXGramo = totalGramos > 0 ? costoMaterial / totalGramos : 0;
-  const precioPorMinuto = LABOR_RATE * tiempoMinutos;
-  const electricidad = ELECTRICITY_RATE * tiempoMinutos;
+  const precioPorMinuto = config.labor_rate * tiempoMinutos;
+  const electricidad = config.electricity_rate * tiempoMinutos;
   const totalTiempoElec = precioPorMinuto + electricidad;
   const sinMargen = costoMaterial + electricidad;
-  const conMargen = costoMaterial * MARGIN + totalTiempoElec;
-  const conGanancia = conMargen * PROFIT;
+  const conMargen = costoMaterial * config.margin + totalTiempoElec;
+  const conGanancia = conMargen * config.profit;
 
   return {
     precioXGramo,
@@ -52,6 +51,7 @@ export function decodeMateriales(raw: string): {
   descripcion: string;
   materiales: Array<{ precio: number; gramos: number }>;
 } {
+  if (!raw) return { descripcion: "", materiales: [] };
   const SEP = " | DET:";
   const idx = raw.indexOf(SEP);
   if (idx === -1) return { descripcion: raw, materiales: [] };

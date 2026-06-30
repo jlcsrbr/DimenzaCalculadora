@@ -1,7 +1,7 @@
-import { Venta } from "./types";
+import { Venta, VentaItem } from "./types";
 import { decodeMateriales } from "./calculadora-logica";
 
-export async function generarBoleta(venta: Venta): Promise<void> {
+export async function generarBoleta(venta: Venta, items: VentaItem[] = []): Promise<void> {
   const { jsPDF } = await import("jspdf");
   const { default: autoTable } = await import("jspdf-autotable");
 
@@ -29,7 +29,6 @@ export async function generarBoleta(venta: Venta): Promise<void> {
   const fecha = venta.fecha_registro
     ? new Date(venta.fecha_registro).toLocaleDateString("es-PE")
     : new Date().toLocaleDateString("es-PE");
-  const { descripcion } = decodeMateriales(venta.descripcion);
 
   const info: [string, string][] = [
     ["Cliente:", venta.cliente],
@@ -53,23 +52,58 @@ export async function generarBoleta(venta: Venta): Promise<void> {
 
   y += 6;
 
-  // Service table
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
   doc.setTextColor(...SECONDARY);
   doc.text("SERVICIO", 14, y);
   y += 4;
 
-  autoTable(doc, {
-    startY: y,
-    head: [["Descripción", "Precio"]],
-    body: [[descripcion, `S/ ${venta.precio_venta.toFixed(2)}`]],
-    theme: "grid",
-    headStyles: { fillColor: PRIMARY, textColor: [255, 255, 255], fontSize: 9 },
-    bodyStyles: { fontSize: 9, textColor: TEXT },
-    columnStyles: { 1: { halign: "right", cellWidth: 30 } },
-    margin: { left: 10, right: 10 },
-  });
+  if (venta.usar_resumen) {
+    // Modo resumen: una sola fila con descripción personalizada
+    const resumen = venta.descripcion_resumen || venta.descripcion;
+    autoTable(doc, {
+      startY: y,
+      head: [["Descripción", "Precio"]],
+      body: [[resumen, `S/ ${venta.precio_venta.toFixed(2)}`]],
+      theme: "grid",
+      headStyles: { fillColor: PRIMARY, textColor: [255, 255, 255], fontSize: 9 },
+      bodyStyles: { fontSize: 9, textColor: TEXT },
+      columnStyles: { 1: { halign: "right", cellWidth: 30 } },
+      margin: { left: 10, right: 10 },
+    });
+  } else if (items.length > 0) {
+    // Modo detalle: tabla de ítems con precio individual
+    autoTable(doc, {
+      startY: y,
+      head: [["#", "Artículo", "Precio"]],
+      body: items.map((item, i) => [
+        i + 1,
+        item.descripcion,
+        `S/ ${item.precio_item.toFixed(2)}`,
+      ]),
+      theme: "grid",
+      headStyles: { fillColor: PRIMARY, textColor: [255, 255, 255], fontSize: 9 },
+      bodyStyles: { fontSize: 9, textColor: TEXT },
+      columnStyles: {
+        0: { cellWidth: 10, halign: "center" },
+        2: { halign: "right", cellWidth: 30 },
+      },
+      margin: { left: 10, right: 10 },
+    });
+  } else {
+    // Legacy: descripción decodificada
+    const { descripcion } = decodeMateriales(venta.descripcion);
+    autoTable(doc, {
+      startY: y,
+      head: [["Descripción", "Precio"]],
+      body: [[descripcion || venta.descripcion, `S/ ${venta.precio_venta.toFixed(2)}`]],
+      theme: "grid",
+      headStyles: { fillColor: PRIMARY, textColor: [255, 255, 255], fontSize: 9 },
+      bodyStyles: { fontSize: 9, textColor: TEXT },
+      columnStyles: { 1: { halign: "right", cellWidth: 30 } },
+      margin: { left: 10, right: 10 },
+    });
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   y = (doc as any).lastAutoTable.finalY + 8;
