@@ -4,17 +4,16 @@ import { useState, useEffect, useCallback } from "react";
 import {
   getCotizaciones,
   getCotizacionItems,
-  insertVenta,
-  insertVentaConItems,
+  insertStockDesdeItems,
   deleteCotizacion,
 } from "@/lib/supabase";
 import { decodeMateriales } from "@/lib/calculadora-logica";
-import { Cotizacion, CotizacionItem, CotizacionItemMaterial, VentaItem } from "@/lib/types";
+import { Cotizacion, CotizacionItem } from "@/lib/types";
 
 const fmt = (n: number) => `S/ ${n.toFixed(2)}`;
 const fmtFecha = (s?: string) => (s ? new Date(s).toLocaleDateString("es-PE") : "-");
 
-export default function Cotizaciones({ onVentaGuardada }: { onVentaGuardada: () => void }) {
+export default function Cotizaciones({ onStockActualizado }: { onStockActualizado: () => void }) {
   const [rows, setRows] = useState<Cotizacion[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -27,70 +26,62 @@ export default function Cotizaciones({ onVentaGuardada }: { onVentaGuardada: () 
   const [confirmEliminar, setConfirmEliminar] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  // Modal cerrar venta
-  const [modalVenta, setModalVenta] = useState(false);
-  const [ventaItems, setVentaItems] = useState<CotizacionItem[]>([]);
+  // Modal pasar a stock
+  const [modalStock, setModalStock] = useState(false);
+  const [cotItems, setCotItems] = useState<CotizacionItem[]>([]);
   const [loadingItems, setLoadingItems] = useState(false);
-  const [paso, setPaso] = useState<1 | 2>(1);
-  const [preciosPorItem, setPreciosPorItem] = useState<Record<string, string>>({});
-  const [precioLegacy, setPrecioLegacy] = useState("");
-  const [totalOverride, setTotalOverride] = useState("");
-  const [usarResumen, setUsarResumen] = useState(false);
-  const [resumenTexto, setResumenTexto] = useState("");
+  const [stockForm, setStockForm] = useState<
+    Record<string, { precio_venta_sugerido: string; cantidad: string }>
+  >({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
 
-  const load = useCallback(
-    async (cl?: string, de?: string, ha?: string) => {
-      setLoading(true);
-      setError("");
-      try {
-        setRows(await getCotizaciones(cl, de, ha));
-      } catch (e) {
-        setError("Error al cargar cotizaciones: " + (e instanceof Error ? e.message : String(e)));
-      } finally {
-        setLoading(false);
-      }
-    },
-    []
-  );
+  const load = useCallback(async (cl?: string, de?: string, ha?: string) => {
+    setLoading(true);
+    setError("");
+    try {
+      setRows(await getCotizaciones(cl, de, ha));
+    } catch (e) {
+      setError("Error al cargar cotizaciones: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
 
-  const buscar = () =>
-    load(filtroCliente || undefined, filtroDesde || undefined, filtroHasta || undefined);
-  const limpiarFiltros = () => {
-    setFiltroCliente("");
-    setFiltroDesde("");
-    setFiltroHasta("");
-    load();
-  };
+  const buscar = () => load(filtroCliente || undefined, filtroDesde || undefined, filtroHasta || undefined);
+  const limpiarFiltros = () => { setFiltroCliente(""); setFiltroDesde(""); setFiltroHasta(""); load(); };
 
   const selectedRow = rows.find((r) => r.id === selected);
 
-  const abrirModalVenta = async () => {
+  const abrirModalStock = async () => {
     if (!selectedRow) return;
     setLoadingItems(true);
     setSaveError("");
-    setPaso(1);
-    setUsarResumen(false);
-    setResumenTexto("");
-    setTotalOverride("");
     try {
       const items = await getCotizacionItems(selectedRow.id);
-      setVentaItems(items);
+      setCotItems(items);
+
+      // Pre-llenar formulario: precio sugerido = inv_con_ganancia, cantidad = 1
+      const form: Record<string, { precio_venta_sugerido: string; cantidad: string }> = {};
       if (items.length > 0) {
-        const precios: Record<string, string> = {};
         items.forEach((item) => {
-          if (item.id) precios[item.id] = String((item.inv_con_ganancia ?? 0).toFixed(2));
+          const key = item.id ?? item.descripcion;
+          form[key] = {
+            precio_venta_sugerido: String((item.inv_con_ganancia ?? 0).toFixed(2)),
+            cantidad: "1",
+          };
         });
-        setPreciosPorItem(precios);
       } else {
-        setPrecioLegacy(String(selectedRow.inv_con_ganancia.toFixed(2)));
+        // Legacy: cotización sin ítems individuales
+        form["__legacy__"] = {
+          precio_venta_sugerido: String(selectedRow.inv_con_ganancia.toFixed(2)),
+          cantidad: "1",
+        };
       }
-      setModalVenta(true);
+      setStockForm(form);
+      setModalStock(true);
     } catch (e) {
       setError("Error al cargar ítems: " + (e instanceof Error ? e.message : String(e)));
     } finally {
@@ -98,67 +89,47 @@ export default function Cotizaciones({ onVentaGuardada }: { onVentaGuardada: () 
     }
   };
 
-  const cerrarModal = () => {
-    setModalVenta(false);
-    setSaveError("");
-  };
-
-  const sumaItems = ventaItems.reduce((s, item) => {
-    return s + (parseFloat(preciosPorItem[item.id ?? ""] ?? "0") || 0);
-  }, 0);
-  const totalVenta = totalOverride ? parseFloat(totalOverride) || 0 : sumaItems;
-
-  const guardarVenta = async () => {
+  const guardarEnStock = async () => {
     if (!selectedRow) return;
     setSaveError("");
     setSaving(true);
     try {
-      if (ventaItems.length === 0) {
-        // Flujo legacy
-        const precio = parseFloat(precioLegacy);
-        if (!precio || precio <= 0) {
-          setSaveError("Ingresa un precio válido.");
-          setSaving(false);
-          return;
-        }
-        await insertVenta({
-          id: selectedRow.id,
-          cliente: selectedRow.cliente,
-          descripcion: selectedRow.descripcion,
-          dni: selectedRow.dni,
-          telefono: selectedRow.telefono,
-          costo_base: selectedRow.inv_con_margen,
-          precio_venta: precio,
+      let items: Array<{
+        cotizacion_item_id: string | null;
+        descripcion: string;
+        precio_costo: number;
+        precio_venta_sugerido: number;
+        cantidad: number;
+      }>;
+
+      if (cotItems.length > 0) {
+        items = cotItems.map((item) => {
+          const key = item.id ?? item.descripcion;
+          const f = stockForm[key] ?? { precio_venta_sugerido: "0", cantidad: "1" };
+          return {
+            cotizacion_item_id: item.id ?? null,
+            descripcion: item.descripcion,
+            precio_costo: item.inv_con_ganancia ?? 0,
+            precio_venta_sugerido: parseFloat(f.precio_venta_sugerido) || 0,
+            cantidad: parseInt(f.cantidad) || 1,
+          };
         });
       } else {
-        // Flujo con ítems
-        const ventaItemsList: VentaItem[] = ventaItems.map((item) => ({
-          cotizacion_item_id: item.id ?? null,
-          descripcion: item.descripcion,
-          precio_item: parseFloat(preciosPorItem[item.id ?? ""] ?? "0") || 0,
-        }));
-        const allMateriales: CotizacionItemMaterial[] = ventaItems.flatMap(
-          (item) => item.materiales ?? []
-        );
-        await insertVentaConItems(
-          {
-            id: selectedRow.id,
-            cliente: selectedRow.cliente,
-            descripcion: selectedRow.descripcion,
-            dni: selectedRow.dni,
-            telefono: selectedRow.telefono,
-            costo_base: selectedRow.inv_con_margen,
-            precio_venta: totalVenta,
-            descripcion_resumen: usarResumen ? resumenTexto.trim() : undefined,
-            usar_resumen: usarResumen,
-          },
-          ventaItemsList,
-          allMateriales
-        );
+        const f = stockForm["__legacy__"] ?? { precio_venta_sugerido: "0", cantidad: "1" };
+        const { descripcion } = decodeMateriales(selectedRow.descripcion);
+        items = [{
+          cotizacion_item_id: null,
+          descripcion: descripcion || selectedRow.descripcion,
+          precio_costo: selectedRow.inv_con_ganancia,
+          precio_venta_sugerido: parseFloat(f.precio_venta_sugerido) || 0,
+          cantidad: parseInt(f.cantidad) || 1,
+        }];
       }
-      cerrarModal();
+
+      await insertStockDesdeItems(selectedRow, items);
+      setModalStock(false);
       setSelected(null);
-      onVentaGuardada();
+      onStockActualizado();
     } catch (e) {
       setSaveError("Error al guardar: " + (e instanceof Error ? e.message : String(e)));
     } finally {
@@ -181,8 +152,7 @@ export default function Cotizaciones({ onVentaGuardada }: { onVentaGuardada: () 
     }
   };
 
-  const inputCls =
-    "border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#2980b9]";
+  const inputCls = "border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#2980b9]";
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
@@ -192,43 +162,18 @@ export default function Cotizaciones({ onVentaGuardada }: { onVentaGuardada: () 
         <div className="bg-white rounded-lg shadow p-3 flex flex-wrap gap-2 items-end">
           <div>
             <label className="text-xs text-gray-500 block mb-1">Cliente</label>
-            <input
-              className={inputCls}
-              placeholder="Buscar cliente..."
-              value={filtroCliente}
-              onChange={(e) => setFiltroCliente(e.target.value)}
-            />
+            <input className={inputCls} placeholder="Buscar cliente..." value={filtroCliente} onChange={(e) => setFiltroCliente(e.target.value)} />
           </div>
           <div>
             <label className="text-xs text-gray-500 block mb-1">Desde</label>
-            <input
-              type="date"
-              className={inputCls}
-              value={filtroDesde}
-              onChange={(e) => setFiltroDesde(e.target.value)}
-            />
+            <input type="date" className={inputCls} value={filtroDesde} onChange={(e) => setFiltroDesde(e.target.value)} />
           </div>
           <div>
             <label className="text-xs text-gray-500 block mb-1">Hasta</label>
-            <input
-              type="date"
-              className={inputCls}
-              value={filtroHasta}
-              onChange={(e) => setFiltroHasta(e.target.value)}
-            />
+            <input type="date" className={inputCls} value={filtroHasta} onChange={(e) => setFiltroHasta(e.target.value)} />
           </div>
-          <button
-            onClick={buscar}
-            className="bg-[#2980b9] hover:bg-[#1f618d] text-white text-sm px-4 py-1.5 rounded transition-colors"
-          >
-            Buscar
-          </button>
-          <button
-            onClick={limpiarFiltros}
-            className="bg-gray-200 hover:bg-gray-300 text-gray-700 text-sm px-4 py-1.5 rounded transition-colors"
-          >
-            Limpiar
-          </button>
+          <button onClick={buscar} className="bg-[#2980b9] hover:bg-[#1f618d] text-white text-sm px-4 py-1.5 rounded transition-colors">Buscar</button>
+          <button onClick={limpiarFiltros} className="bg-gray-200 hover:bg-gray-300 text-gray-700 text-sm px-4 py-1.5 rounded transition-colors">Limpiar</button>
           <button
             onClick={() => setConfirmEliminar(true)}
             disabled={!selected}
@@ -269,21 +214,12 @@ export default function Cotizaciones({ onVentaGuardada }: { onVentaGuardada: () 
                     <tr
                       key={r.id}
                       className={`cursor-pointer transition-colors ${
-                        selected === r.id
-                          ? "bg-[#ebf5ff]"
-                          : i % 2 === 0
-                          ? "bg-white"
-                          : "bg-gray-50"
+                        selected === r.id ? "bg-[#ebf5ff]" : i % 2 === 0 ? "bg-white" : "bg-gray-50"
                       } hover:bg-[#ebf5ff]`}
                       onClick={() => setSelected(r.id === selected ? null : r.id)}
                     >
                       <td className="p-2">
-                        <input
-                          type="radio"
-                          checked={selected === r.id}
-                          onChange={() => setSelected(r.id)}
-                          onClick={(e) => e.stopPropagation()}
-                        />
+                        <input type="radio" checked={selected === r.id} onChange={() => setSelected(r.id)} onClick={(e) => e.stopPropagation()} />
                       </td>
                       <td className="p-2 font-mono text-gray-500">{r.id}</td>
                       <td className="p-2 font-semibold">{r.cliente}</td>
@@ -292,9 +228,7 @@ export default function Cotizaciones({ onVentaGuardada }: { onVentaGuardada: () 
                       <td className="p-2 text-right">{r.tiempo}</td>
                       <td className="p-2 text-right">{fmt(r.inv_sin_margen)}</td>
                       <td className="p-2 text-right">{fmt(r.inv_con_margen)}</td>
-                      <td className="p-2 text-right font-bold text-[#2980b9]">
-                        {fmt(r.inv_con_ganancia)}
-                      </td>
+                      <td className="p-2 text-right font-bold text-[#2980b9]">{fmt(r.inv_con_ganancia)}</td>
                       <td className="p-2 text-gray-500">{fmtFecha(r.fecha_registro)}</td>
                     </tr>
                   );
@@ -307,28 +241,20 @@ export default function Cotizaciones({ onVentaGuardada }: { onVentaGuardada: () 
 
       {/* Panel lateral */}
       <div className="bg-white rounded-lg shadow p-4">
-        <h2 className="text-sm font-bold text-[#1f618d] uppercase mb-3">Cerrar Venta</h2>
+        <h2 className="text-sm font-bold text-[#1f618d] uppercase mb-3">Pasar a Stock</h2>
         {selectedRow ? (
           <div className="space-y-3">
             <div className="bg-[#ebf5ff] rounded p-3 text-xs space-y-1">
-              <p>
-                <span className="font-semibold">Cliente:</span> {selectedRow.cliente}
-              </p>
-              <p>
-                <span className="font-semibold">Total sugerido:</span>{" "}
-                {fmt(selectedRow.inv_con_ganancia)}
-              </p>
-              <p>
-                <span className="font-semibold">Fecha:</span>{" "}
-                {fmtFecha(selectedRow.fecha_registro)}
-              </p>
+              <p><span className="font-semibold">Cliente:</span> {selectedRow.cliente}</p>
+              <p><span className="font-semibold">Total cotizado:</span> {fmt(selectedRow.inv_con_ganancia)}</p>
+              <p><span className="font-semibold">Fecha:</span> {fmtFecha(selectedRow.fecha_registro)}</p>
             </div>
             <button
-              onClick={abrirModalVenta}
+              onClick={abrirModalStock}
               disabled={loadingItems}
-              className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-2 rounded text-sm transition-colors disabled:opacity-50"
+              className="w-full bg-orange-500 hover:bg-orange-600 text-white font-semibold py-2 rounded text-sm transition-colors disabled:opacity-50"
             >
-              {loadingItems ? "Cargando..." : "Cerrar como Venta →"}
+              {loadingItems ? "Cargando..." : "Pasar a Stock →"}
             </button>
           </div>
         ) : (
@@ -338,219 +264,124 @@ export default function Cotizaciones({ onVentaGuardada }: { onVentaGuardada: () 
         )}
       </div>
 
-      {/* Modal cerrar venta */}
-      {modalVenta && selectedRow && (
+      {/* Modal pasar a stock */}
+      {modalStock && selectedRow && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl max-w-lg w-full">
-            {/* Header */}
             <div className="flex justify-between items-center p-5 border-b">
               <div>
-                <h2 className="text-base font-bold text-[#1f618d]">
-                  {ventaItems.length === 0
-                    ? "Cerrar venta"
-                    : paso === 1
-                    ? "Paso 1 — Revisar precios"
-                    : "Paso 2 — Presentación al cliente"}
-                </h2>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  Cliente: {selectedRow.cliente}
-                </p>
+                <h2 className="text-base font-bold text-[#1f618d]">Pasar a Stock</h2>
+                <p className="text-xs text-gray-500 mt-0.5">Cliente: {selectedRow.cliente}</p>
               </div>
-              <button
-                onClick={cerrarModal}
-                className="text-gray-400 hover:text-gray-600 text-xl font-bold leading-none"
-              >
-                ×
-              </button>
+              <button onClick={() => setModalStock(false)} className="text-gray-400 hover:text-gray-600 text-xl font-bold leading-none">×</button>
             </div>
 
-            <div className="p-5">
-              {/* Flujo legacy (sin ítems) */}
-              {ventaItems.length === 0 && (
-                <div className="space-y-3">
-                  <p className="text-xs text-amber-600 bg-amber-50 rounded p-2">
-                    Esta cotización no tiene ítems (formato anterior). Ingresa el precio de venta directamente.
-                  </p>
-                  <div>
-                    <label className="text-xs text-gray-500 block mb-1">
-                      Precio sugerido: {fmt(selectedRow.inv_con_ganancia)}
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      className="w-full border border-gray-300 rounded px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#2980b9]"
-                      placeholder={selectedRow.inv_con_ganancia.toFixed(2)}
-                      value={precioLegacy}
-                      onChange={(e) => setPrecioLegacy(e.target.value)}
-                    />
-                  </div>
-                </div>
-              )}
+            <div className="p-5 space-y-3">
+              <p className="text-xs text-gray-500">
+                Confirma la cantidad producida y el precio de venta sugerido para cada artículo.
+              </p>
 
-              {/* Paso 1: ítems con precios */}
-              {ventaItems.length > 0 && paso === 1 && (
-                <div className="space-y-3">
-                  <div className="max-h-60 overflow-y-auto">
-                    <table className="w-full text-xs">
-                      <thead className="sticky top-0 bg-[#ebf5ff]">
-                        <tr>
-                          <th className="p-2 text-left">Artículo</th>
-                          <th className="p-2 text-right text-gray-400">Sugerido</th>
-                          <th className="p-2 text-right">Tu precio (S/)</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {ventaItems.map((item, i) => (
-                          <tr
-                            key={item.id ?? i}
-                            className={i % 2 === 0 ? "bg-white" : "bg-gray-50"}
-                          >
-                            <td className="p-2 font-semibold">{item.descripcion}</td>
-                            <td className="p-2 text-right text-gray-400">
-                              {item.inv_con_ganancia != null
-                                ? fmt(item.inv_con_ganancia)
-                                : "-"}
-                            </td>
-                            <td className="p-2">
-                              <input
-                                type="number"
-                                min="0"
-                                className="w-24 border border-gray-300 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-[#2980b9] text-right"
-                                value={preciosPorItem[item.id ?? ""] ?? ""}
-                                onChange={(e) =>
-                                  setPreciosPorItem((p) => ({
-                                    ...p,
-                                    [item.id ?? ""]: e.target.value,
-                                  }))
-                                }
-                              />
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+              {/* Header columnas */}
+              <div className="grid grid-cols-12 gap-2 text-xs font-semibold text-gray-400 px-1">
+                <span className="col-span-5">Artículo</span>
+                <span className="col-span-3 text-right">Costo</span>
+                <span className="col-span-2 text-right">P. Venta</span>
+                <span className="col-span-2 text-right">Cant.</span>
+              </div>
 
-                  <div className="border-t pt-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-semibold text-gray-700">
-                        Suma ítems: {fmt(sumaItems)}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <label className="text-xs text-gray-500 shrink-0">
-                        Override total (opcional):
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        className="flex-1 border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#2980b9]"
-                        placeholder={fmt(sumaItems)}
-                        value={totalOverride}
-                        onChange={(e) => setTotalOverride(e.target.value)}
-                      />
-                    </div>
-                    <p className="text-sm font-bold text-[#1f618d] mt-2">
-                      Total: {fmt(totalVenta)}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* Paso 2: presentación */}
-              {ventaItems.length > 0 && paso === 2 && (
-                <div className="space-y-4">
-                  <p className="text-sm font-semibold text-gray-600">
-                    Total: <span className="text-[#2980b9]">{fmt(totalVenta)}</span>
-                  </p>
-
-                  <div className="space-y-3">
-                    <label className="flex items-start gap-3 cursor-pointer group">
-                      <input
-                        type="radio"
-                        name="modo"
-                        checked={!usarResumen}
-                        onChange={() => setUsarResumen(false)}
-                        className="mt-0.5"
-                      />
-                      <div>
-                        <p className="text-sm font-semibold text-gray-700">
-                          Detalle completo
-                        </p>
-                        <p className="text-xs text-gray-400">
-                          La boleta mostrará todos los artículos con sus precios individuales.
-                        </p>
+              <div className="max-h-64 overflow-y-auto space-y-2">
+                {cotItems.length > 0 ? (
+                  cotItems.map((item) => {
+                    const key = item.id ?? item.descripcion;
+                    const f = stockForm[key] ?? { precio_venta_sugerido: "0", cantidad: "1" };
+                    return (
+                      <div key={key} className="grid grid-cols-12 gap-2 items-center bg-gray-50 rounded p-2">
+                        <span className="col-span-5 text-xs font-semibold text-gray-700 truncate" title={item.descripcion}>
+                          {item.descripcion}
+                        </span>
+                        <span className="col-span-3 text-xs text-gray-400 text-right">
+                          {fmt(item.inv_con_ganancia ?? 0)}
+                        </span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          className="col-span-2 border border-gray-300 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-[#2980b9] text-right"
+                          value={f.precio_venta_sugerido}
+                          onChange={(e) =>
+                            setStockForm((prev) => ({
+                              ...prev,
+                              [key]: { ...f, precio_venta_sugerido: e.target.value },
+                            }))
+                          }
+                        />
+                        <input
+                          type="number"
+                          min="1"
+                          className="col-span-2 border border-gray-300 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-[#2980b9] text-right"
+                          value={f.cantidad}
+                          onChange={(e) =>
+                            setStockForm((prev) => ({
+                              ...prev,
+                              [key]: { ...f, cantidad: e.target.value },
+                            }))
+                          }
+                        />
                       </div>
-                    </label>
-
-                    <label className="flex items-start gap-3 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="modo"
-                        checked={usarResumen}
-                        onChange={() => setUsarResumen(true)}
-                        className="mt-0.5"
-                      />
-                      <div className="flex-1">
-                        <p className="text-sm font-semibold text-gray-700">
-                          Resumen personalizado
-                        </p>
-                        <p className="text-xs text-gray-400">
-                          Escribe una descripción resumida para el cliente.
-                        </p>
+                    );
+                  })
+                ) : (
+                  // Legacy
+                  (() => {
+                    const f = stockForm["__legacy__"] ?? { precio_venta_sugerido: "0", cantidad: "1" };
+                    const { descripcion } = decodeMateriales(selectedRow.descripcion);
+                    return (
+                      <div className="grid grid-cols-12 gap-2 items-center bg-gray-50 rounded p-2">
+                        <span className="col-span-5 text-xs font-semibold text-gray-700 truncate">
+                          {descripcion || selectedRow.descripcion}
+                        </span>
+                        <span className="col-span-3 text-xs text-gray-400 text-right">
+                          {fmt(selectedRow.inv_con_ganancia)}
+                        </span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          className="col-span-2 border border-gray-300 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-[#2980b9] text-right"
+                          value={f.precio_venta_sugerido}
+                          onChange={(e) =>
+                            setStockForm((prev) => ({ ...prev, __legacy__: { ...f, precio_venta_sugerido: e.target.value } }))
+                          }
+                        />
+                        <input
+                          type="number"
+                          min="1"
+                          className="col-span-2 border border-gray-300 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-[#2980b9] text-right"
+                          value={f.cantidad}
+                          onChange={(e) =>
+                            setStockForm((prev) => ({ ...prev, __legacy__: { ...f, cantidad: e.target.value } }))
+                          }
+                        />
                       </div>
-                    </label>
+                    );
+                  })()
+                )}
+              </div>
 
-                    {usarResumen && (
-                      <textarea
-                        className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#2980b9] mt-1"
-                        rows={3}
-                        placeholder="Ej: Impresión 3D de figuras decorativas — set completo"
-                        value={resumenTexto}
-                        onChange={(e) => setResumenTexto(e.target.value)}
-                      />
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {saveError && (
-                <p className="text-red-600 text-xs mt-3">{saveError}</p>
-              )}
+              {saveError && <p className="text-red-600 text-xs">{saveError}</p>}
             </div>
 
-            {/* Footer */}
             <div className="flex gap-2 justify-end p-5 border-t">
-              {ventaItems.length > 0 && paso === 2 && (
-                <button
-                  onClick={() => setPaso(1)}
-                  className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 text-sm rounded transition-colors"
-                >
-                  ← Atrás
-                </button>
-              )}
-              <button
-                onClick={cerrarModal}
-                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 text-sm rounded transition-colors"
-              >
+              <button onClick={() => setModalStock(false)} className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 text-sm rounded transition-colors">
                 Cancelar
               </button>
-              {ventaItems.length > 0 && paso === 1 ? (
-                <button
-                  onClick={() => setPaso(2)}
-                  className="px-5 py-2 bg-[#2980b9] hover:bg-[#1f618d] text-white text-sm rounded transition-colors"
-                >
-                  Siguiente →
-                </button>
-              ) : (
-                <button
-                  onClick={guardarVenta}
-                  disabled={saving}
-                  className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold text-sm rounded transition-colors disabled:opacity-50"
-                >
-                  {saving ? "Guardando..." : "Guardar Venta"}
-                </button>
-              )}
+              <button
+                onClick={guardarEnStock}
+                disabled={saving}
+                className="px-5 py-2 bg-orange-500 hover:bg-orange-600 text-white font-semibold text-sm rounded transition-colors disabled:opacity-50"
+              >
+                {saving ? "Guardando..." : "Confirmar Stock"}
+              </button>
             </div>
           </div>
         </div>
@@ -561,30 +392,14 @@ export default function Cotizaciones({ onVentaGuardada }: { onVentaGuardada: () 
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl max-w-sm w-full p-6">
             <h2 className="text-base font-bold text-red-600 mb-2">Eliminar cotización</h2>
-            <p className="text-sm text-gray-600 mb-1">
-              ¿Estás seguro de eliminar esta cotización?
-            </p>
+            <p className="text-sm text-gray-600 mb-1">¿Estás seguro de eliminar esta cotización?</p>
             <div className="bg-red-50 rounded p-3 text-sm mb-4">
-              <p>
-                <span className="font-semibold">Cliente:</span> {selectedRow.cliente}
-              </p>
-              <p>
-                <span className="font-semibold">Total:</span>{" "}
-                {fmt(selectedRow.inv_con_ganancia)}
-              </p>
+              <p><span className="font-semibold">Cliente:</span> {selectedRow.cliente}</p>
+              <p><span className="font-semibold">Total:</span> {fmt(selectedRow.inv_con_ganancia)}</p>
             </div>
             <div className="flex gap-2 justify-end">
-              <button
-                onClick={() => setConfirmEliminar(false)}
-                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 text-sm rounded transition-colors"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={eliminar}
-                disabled={deleting}
-                className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white text-sm rounded transition-colors disabled:opacity-50"
-              >
+              <button onClick={() => setConfirmEliminar(false)} className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 text-sm rounded transition-colors">Cancelar</button>
+              <button onClick={eliminar} disabled={deleting} className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white text-sm rounded transition-colors disabled:opacity-50">
                 {deleting ? "Eliminando..." : "Eliminar"}
               </button>
             </div>

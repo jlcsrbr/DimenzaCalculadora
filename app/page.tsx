@@ -3,17 +3,19 @@
 import { useState, useEffect } from "react";
 import Calculadora from "@/components/Calculadora";
 import Cotizaciones from "@/components/Cotizaciones";
+import Stock from "@/components/Stock";
 import Ventas from "@/components/Ventas";
 import Filamentos from "@/components/Filamentos";
 import Configuracion from "@/components/Configuracion";
 import { getFormulaConfig } from "@/lib/supabase";
 import { FormulaConfig, DEFAULT_FORMULA } from "@/lib/types";
 
-type Tab = "calculadora" | "cotizaciones" | "ventas" | "filamentos" | "configuracion";
+type Tab = "calculadora" | "cotizaciones" | "stock" | "ventas" | "filamentos" | "configuracion";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "calculadora", label: "Calculadora" },
   { id: "cotizaciones", label: "Cotizaciones" },
+  { id: "stock", label: "Stock" },
   { id: "ventas", label: "Ventas" },
   { id: "filamentos", label: "Filamentos" },
   { id: "configuracion", label: "Configuración" },
@@ -30,9 +32,7 @@ export default function Home() {
     getFormulaConfig().then(setFormulaConfig).catch(() => {});
   };
 
-  useEffect(() => {
-    reloadConfig();
-  }, []);
+  useEffect(() => { reloadConfig(); }, []);
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -57,9 +57,7 @@ export default function Home() {
               key={t.id}
               onClick={() => setTab(t.id)}
               className={`px-5 py-3 text-sm font-semibold whitespace-nowrap transition-colors ${
-                tab === t.id
-                  ? "bg-white text-[#2980b9]"
-                  : "text-blue-100 hover:bg-white/10"
+                tab === t.id ? "bg-white text-[#2980b9]" : "text-blue-100 hover:bg-white/10"
               }`}
             >
               {t.label}
@@ -73,26 +71,24 @@ export default function Home() {
         {tab === "calculadora" && (
           <Calculadora
             formulaConfig={formulaConfig}
-            onSaved={() => {
-              refresh();
-              setTab("cotizaciones");
-            }}
+            onSaved={() => { refresh(); setTab("cotizaciones"); }}
           />
         )}
         {tab === "cotizaciones" && (
           <Cotizaciones
             key={`cot-${refreshKey}`}
-            onVentaGuardada={() => {
-              refresh();
-              setTab("ventas");
-            }}
+            onStockActualizado={() => { refresh(); setTab("stock"); }}
+          />
+        )}
+        {tab === "stock" && (
+          <Stock
+            key={`stk-${refreshKey}`}
+            onVentaGuardada={() => { refresh(); setTab("ventas"); }}
           />
         )}
         {tab === "ventas" && <Ventas key={`ven-${refreshKey}`} />}
         {tab === "filamentos" && <Filamentos />}
-        {tab === "configuracion" && (
-          <Configuracion onSaved={reloadConfig} />
-        )}
+        {tab === "configuracion" && <Configuracion onSaved={reloadConfig} />}
       </main>
 
       <footer className="bg-[#2980b9] text-blue-100 text-center text-xs py-2">

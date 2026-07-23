@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import {
   Cotizacion, Venta, FormulaConfig, DEFAULT_FORMULA,
-  Filamento, CotizacionItem, CotizacionItemMaterial, VentaItem,
+  Filamento, CotizacionItem, CotizacionItemMaterial, VentaItem, StockProducto,
 } from "./types";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -184,6 +184,68 @@ export async function insertFilamento(f: Omit<Filamento, "id" | "fecha_registro"
 export async function updateFilamento(id: string, f: Partial<Omit<Filamento, "id" | "fecha_registro">>) {
   const { error } = await supabase.from("filamentos").update(f).eq("id", id);
   if (error) throw sbError(error);
+}
+
+// --- Stock de productos ---
+
+export async function getStockProductos(): Promise<StockProducto[]> {
+  const { data, error } = await supabase
+    .from("stock_productos")
+    .select("*")
+    .gt("cantidad_disponible", 0)
+    .order("fecha_produccion", { ascending: false });
+  if (error) throw sbError(error);
+  return (data ?? []) as StockProducto[];
+}
+
+export async function insertStockDesdeItems(
+  cotizacion: Cotizacion,
+  items: Array<{ cotizacion_item_id: string | null; descripcion: string; precio_costo: number; precio_venta_sugerido: number; cantidad: number }>
+) {
+  const rows = items.map((item) => ({
+    cotizacion_id: cotizacion.id,
+    cotizacion_item_id: item.cotizacion_item_id,
+    descripcion: item.descripcion,
+    precio_costo: item.precio_costo,
+    precio_venta_sugerido: item.precio_venta_sugerido,
+    cantidad_disponible: item.cantidad,
+  }));
+  const { error } = await supabase.from("stock_productos").insert(rows);
+  if (error) throw sbError(error);
+}
+
+export async function venderDesdeStock(
+  venta: Omit<Venta, "fecha_registro">,
+  ventaItems: Array<{ stock_producto_id: string; descripcion: string; precio_item: number; cantidad: number }>
+) {
+  const { error: ventaError } = await supabase.from("ventas").insert([venta]);
+  if (ventaError) throw sbError(ventaError);
+
+  const { error: itemsError } = await supabase.from("venta_items").insert(
+    ventaItems.map((item, i) => ({
+      venta_id: venta.id,
+      stock_producto_id: item.stock_producto_id,
+      descripcion: item.descripcion,
+      precio_item: item.precio_item,
+      cantidad: item.cantidad,
+      orden: i + 1,
+    }))
+  );
+  if (itemsError) throw sbError(itemsError);
+
+  // Descontar cantidad del stock
+  for (const item of ventaItems) {
+    const { data: sp } = await supabase
+      .from("stock_productos")
+      .select("cantidad_disponible")
+      .eq("id", item.stock_producto_id)
+      .single();
+    if (!sp) continue;
+    await supabase
+      .from("stock_productos")
+      .update({ cantidad_disponible: Math.max(0, sp.cantidad_disponible - item.cantidad) })
+      .eq("id", item.stock_producto_id);
+  }
 }
 
 // --- Tipos de filamento ---

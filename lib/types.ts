@@ -91,7 +91,20 @@ export interface VentaItem {
   id?: string;
   venta_id?: string;
   cotizacion_item_id?: string | null;
+  stock_producto_id?: string | null;
   descripcion: string;
   precio_item: number;
+  cantidad?: number;
   orden?: number;
+}
+
+export interface StockProducto {
+  id: string;
+  cotizacion_id?: string | null;
+  cotizacion_item_id?: string | null;
+  descripcion: string;
+  precio_costo: number;
+  precio_venta_sugerido: number;
+  cantidad_disponible: number;
+  fecha_produccion?: string;
 }
